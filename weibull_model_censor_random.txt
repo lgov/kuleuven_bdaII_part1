@@ -1,0 +1,53 @@
+weibull_model{
+    # loop for right censoring
+    for (i in 1:n_right){
+        y_r[i] ~ dweib(rho, lambda_r[i])C(right_cens[i],)
+        # use the jth plate for the ith observation
+        mu_r[i] <- betas[1] + betas[2]*group_r[i] + betas[3]*grubsize_r[i] + plate_unident[urepid_r[i]]
+        lambda_r[i] <- exp(mu_r[i])
+        # PPO
+        log_ppo_r[i] <- log(rho*lambda_r[i]) + (rho - 1)*log(y_r[i]*lambda_r[i]) - pow(y_r[i]*lambda_r[i], rho)
+        ppo_r[i] <- exp(log_ppo_r[i])
+        # basis for computing CPO
+        icpo_r[i]  <- 1/ppo_r[i]
+    }
+    # loop for interval censoring
+    for (i in 1:n_int){
+        y_int[i] ~ dweib(rho, lambda_int[i])C(int_lower_cens[i],int_upper_cens[i])
+        mu_int[i] <- betas[1] + betas[2]*group_int[i] + betas[3]*grubsize_int[i] + plate_unident[urepid_int[i]]
+        lambda_int[i] <- exp(mu_int[i])
+        log_ppo_int[i] <- log(rho*lambda_int[i]) + (rho - 1)*log(y_int[i]*lambda_int[i]) - pow(y_int[i]*lambda_int[i], rho)
+        ppo_int[i] <- exp(log_ppo_int[i])
+        icpo_int[i]  <- 1/ppo_int[i]
+    }
+
+    # main effects
+    for (k in 1:3){
+        mu_beta[k] <- 0
+    }
+    tau_b <- .000001
+    for (m in 1:3){
+      for (n in 1:3){
+        prec_beta[m,n] <- equals(m,n)*tau_b
+      }
+    }
+    betas[1:3] ~ dmnorm(mu_beta[], prec_beta[,])
+    # weibull param
+    rho ~ dgamma(1, .0001)
+
+    # Set up priors for each plate, i.e., the distribution of the random effects
+    # Zero centered priors ("post sweeping")
+    for (j in 1:J){
+      plate_unident[j] ~ dnorm(mu_plate, tau_plate)
+      # Monitor this set of effects
+      plate[j] <- plate_unident[j] - avg_plate
+    }
+    # Intercept to monitor
+    beta_star <- betas[1] + avg_plate
+    # average of unindentified effects
+    avg_plate <- mean(plate_unident[])
+
+    tau_plate <- pow(sd_plate, -1)
+    sd_plate ~ dunif(0,10)
+    mu_plate ~ dnorm(0, .0001)
+}
