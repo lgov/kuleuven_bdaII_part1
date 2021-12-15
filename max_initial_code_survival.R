@@ -32,8 +32,8 @@ n_int <- nrow(df_int)
 # https://bmcmedresmethodol.biomedcentral.com/articles/10.1186/1471-2288-9-9
 N <- nrow(df)
 J <- length(unique(df$UREPID))
-# First a Weibull model with random effects but no censoring
 set.seed(13)
+# First a Weibull model with random effects but no censoring
 inits <- function(){
     list(betas = rnorm(3, 0, 3), plate_unident = rnorm(J, 0, 3),
          rho=runif(1, 0, 10))
@@ -76,6 +76,39 @@ gelman.plot(coda_wb_no_censor[, params2check])
 
 crosscorr.plot(coda_wb_no_censor[, 286:305])
 crosscorr.plot(coda_wb_no_censor[, c(1, 3:4)])
+
+
+# Next a lognormal model no with censoring but random effects.
+parameters <- c("beta_star", "betas", "plate", "ppo", "icpo", "test", "ks", "ks.rep")
+model_file <- "lognormal_no_censor_random.txt"
+inits <- function(){
+    list(betas = rnorm(3, 0, 3), plate_unident = rnorm(J, 0, 3),
+         tau=runif(1, 0, 10))
+}
+data <- list(N=N, J=J, logy=log(df$mid), group=df$GROUP, grubsize=df$GRUBSIZE-mean(df$GRUBSIZE), 
+             urepid=df$UREPID)
+print(Sys.time())
+ln_no_censor <- bugs(data, inits=inits, model.file=model_file, parameters=parameters, n.chains=3,
+                 n.burnin=1000, n.iter=10000, save.history=T, codaPkg=T)
+coda_ln_no_censor <- read.bugs(ln_no_censor)
+matrix_coda_ln_no_censor <- as.matrix(coda_ln_no_censor)
+colnames(matrix_coda_ln_no_censor)
+hist(matrix_coda_ln_no_censor[,148:167])
+# Random eff
+traceplot(coda_ln_no_censor[,148:167])
+# main eff
+traceplot(coda_ln_no_censor[,c(1, 3:4)])
+# Formal checks
+params2check <- c(1, 3:4, 148:167)
+geweke.diag(coda_ln_no_censor[[1]][, params2check])
+geweke.diag(coda_ln_no_censor[[2]][, params2check])
+geweke.diag(coda_ln_no_censor[[3]][, params2check])
+gelman.diag(coda_ln_no_censor[, params2check])
+# low corr
+crosscorr.plot(coda_ln_no_censor[, 148:167])
+# Gelman
+gelman.plot(coda_ln_no_censor[, params2check])
+
 
 # Then weibull model with censoring and random effects
 # Right and interval censoring are accounted for in different loops
@@ -137,7 +170,7 @@ traceplot(coda_ln_censor[,148:167])
 # main eff
 traceplot(coda_ln_censor[,c(1, 3:4)])
 # Formal checks
-params2check <- c(1, 3:4, 148:167, 306)
+params2check <- c(1, 3:4, 148:167)
 geweke.diag(coda_ln_censor[[1]][, params2check])
 geweke.diag(coda_ln_censor[[2]][, params2check])
 geweke.diag(coda_ln_censor[[3]][, params2check])

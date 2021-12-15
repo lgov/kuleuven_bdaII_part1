@@ -1,0 +1,70 @@
+model{
+    # loop for uncensored lognormal data
+    for (i in 1:N){
+        logy[i] ~ dnorm(mu[i], tau)
+        # use the jth plate for the ith observation
+        mu[i] <- betas[1] + betas[2]*group[i] + betas[3]*grubsize[i] + plate_unident[urepid[i]]
+        # PPO
+        y[i] <- exp(logy[i])
+        log_ppo[i] <- - pow((logy[i] - mu[i]), 2)/(2*sigma2) - log(y[i]*sqrt(2*PI*sigma2))
+        ppo[i] <- exp(log_ppo[i])
+        # basis for computing CPO
+        icpo[i]  <- 1/ppo[i]
+    }
+    # main effects
+    for (k in 1:3){
+        mu_beta[k] <- 0
+    }
+    # Set up covariance matrix of sorts but params are iid
+    tau_b <- .000001
+    for (m in 1:3){
+      for (n in 1:3){
+        prec_beta[m,n] <- equals(m,n)*tau_b
+      }
+    }
+    betas[1:3] ~ dmnorm(mu_beta[], prec_beta[,])
+    # Set up priors for each plate, i.e., the distribution of the random effects
+    # Zero centered priors ("post sweeping")
+    for (j in 1:J){
+      plate_unident[j] ~ dnorm(mu_plate, tau_plate)
+      # Monitor this set of effects
+      plate[j] <- plate_unident[j] - avg_plate
+      # Replicate ("future data" from same distribution) plate for testing normality
+      plate_unident.rep[j] ~ dnorm(mu_plate, tau_plate)
+      plate.rep[j] <- plate_unident.rep[j] - avg_plate.rep
+
+      # Ranked b0s
+      # ranked returns the jth smallest element from plate
+      rank.b0[j] <- ranked(plate[],j)
+      rank.b0.rep[j] <- ranked(plate.rep[],j)
+    }
+    # Intercept to monitor
+    beta_star <- betas[1] + avg_plate
+    # average of unindentified effects
+    avg_plate <- mean(plate_unident[])
+    # Replication
+    avg_plate.rep <- mean(plate_unident.rep[])
+
+    # Linear params
+    tau ~ dgamma(.0001, .0001)
+    sigma2 <- 1/tau
+    PI <- 3.141593
+    # Random eff params
+    mu_plate ~ dnorm(0, .0001)
+    tau_plate <- pow(sigma_plate, -2)
+    sigma_plate ~ dunif(0, 10)
+
+    # Kolmogorov-Smirnov test for random effects.
+    for (j in 1:J){
+        # CDF from ranked random effects
+        F.gauss[j] <- phi(rank.b0[j])
+        F.gauss.rep[j] <-  phi(rank.b0.rep[j])
+        F.diff[j] <- max(F.gauss[j]-(j-1)/J,j/J-F.gauss[j])
+        F.diff.rep[j] <- max(F.gauss.rep[j]-(j-1)/J,j/J-F.gauss.rep[j])
+    }
+    # Take supremum of differences of CDFs
+    ks <- ranked(F.diff[],J)
+    ks.rep <- ranked(F.diff.rep[],J)
+    ks.test <- step(ks.rep-ks)
+    test[1] <- ks.test
+}
