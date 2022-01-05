@@ -1,0 +1,92 @@
+model{
+    # loop for right censoring
+    for (i in 1:n_right){
+        logy_r[i] ~ dnorm(mu_r[i], tau_r)C(right_cens[i],)
+        # use the jth plate for the ith observation
+        mu_r[i] <- betas[1] + betas[2]*group_r[i] + betas[3]*grubsize_r[i] + plate_unident[urepid_r[i]]
+        # PPO
+        y_r[i] <- exp(logy_r[i])
+        log_ppo_r[i] <- - pow((logy_r[i] - mu_r[i]), 2)/(2*sigma2_r) - log(y_r[i]*sqrt(2*PI*sigma2_r))
+        ppo_r[i] <- exp(log_ppo_r[i])
+        # basis for computing CPO
+        icpo_r[i]  <- 1/ppo_r[i]
+    }
+    # loop for interval censoring
+    for (i in 1:n_int){
+        logy_int[i] ~ dnorm(mu_int[i], tau_int)C(int_lower_cens[i], int_upper_cens[i])
+        mu_int[i] <- betas[1] + betas[2]*group_int[i] + betas[3]*grubsize_int[i] + plate_unident[urepid_int[i]]
+        y_int[i] <- exp(logy_int[i])
+        log_ppo_int[i] <- - pow((logy_int[i] - mu_int[i]), 2)/(2*sigma2_int) - log(y_int[i]*sqrt(2*PI*sigma2_int))
+        ppo_int[i] <- exp(log_ppo_int[i])
+        icpo_int[i]  <- 1/ppo_int[i]
+    }
+
+    # main effects
+    for (k in 1:3){
+        mu_beta[k] <- 0
+    }
+    # Set up covariance matrix of sorts but params are iid
+    tau_b <- .000001
+    for (m in 1:3){
+      for (n in 1:3){
+        prec_beta[m,n] <- equals(m,n)*tau_b
+      }
+    }
+    betas[1:3] ~ dmnorm(mu_beta[], prec_beta[,])
+    # Set up priors for each plate, i.e., the distribution of the random effects
+    # Zero centered priors ("post sweeping")
+    for (j in 1:J){
+      # Use a mixture model for the random effect, where we choose one of the normals
+      # with probability p.
+      plate_unident[j] ~ dnorm(mu_plate[id_mix[j]], tau_plate[id_mix[j]])
+      id_mix[j] ~ dcat(p_state[])
+      # Monitor this set of effects
+      plate[j] <- plate_unident[j] - avg_plate
+      # Replicate ("future data" from same distribution) plate for testing normality
+      plate_unident.rep[j] ~ dnorm(mu_plate[id_mix[j]], tau_plate[id_mix[j]])
+      plate.rep[j] <- plate_unident.rep[j] - avg_plate.rep
+
+      # Ranked b0s
+      # ranked returns the jth smallest element from plate
+      rank.b0[j] <- ranked(plate[],j)
+      rank.b0.rep[j] <- ranked(plate.rep[],j)
+    }
+    # Intercept to monitor
+    beta_star <- betas[1] + avg_plate
+    # average of unindentified effects
+    avg_plate <- mean(plate_unident[])
+    # Replication
+    avg_plate.rep <- mean(plate_unident.rep[])
+
+    # Linear params
+    tau_r ~ dgamma(.0001, .0001)
+    tau_int ~ dgamma(.0001, .0001)
+    sigma2_r <- 1/tau_r
+    sigma2_int <- 1/tau_int
+    PI <- 3.141593
+
+    # Random eff params and mixture model
+    p_state[1:2] ~ ddirch(alpha[])
+    alpha[1] <- 1
+    alpha[2] <- 1
+    mu_plate[1] ~ dnorm(0, .0001)
+    mu_plate[2] ~ dnorm(0, .0001)
+    tau_plate[1] <- pow(sigma_plate1, -2)
+    tau_plate[2] <- pow(sigma_plate2, -2)
+    sigma_plate1 ~ dunif(0, 10)
+    sigma_plate2 ~ dunif(0, 10)
+
+    # Kolmogorov-Smirnov test for random effects.
+    for (j in 1:J){
+        # CDF from ranked random effects
+        F.gauss[j] <- phi(rank.b0[j])
+        F.gauss.rep[j] <-  phi(rank.b0.rep[j])
+        F.diff[j] <- max(F.gauss[j]-(j-1)/J,j/J-F.gauss[j])
+        F.diff.rep[j] <- max(F.gauss.rep[j]-(j-1)/J,j/J-F.gauss.rep[j])
+    }
+    # Take supremum of differences of CDFs
+    ks <- ranked(F.diff[],J)
+    ks.rep <- ranked(F.diff.rep[],J)
+    ks.test <- step(ks.rep-ks)
+    test[1] <- ks.test
+}

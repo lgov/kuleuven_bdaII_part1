@@ -10,7 +10,7 @@ library(coda)
 library(ggplot2)
 
 setwd("C:/Users/USER/Documents/ku_leuven/courses/bayesian_II/project1")
-#setwd("D:/asus_documents/ku_leuven/courses/bayesian_II/project1/")
+setwd("D:/asus_documents/ku_leuven/courses/bayesian_II/project1/")
 df <- read.csv("Grubs_Nematodes.csv", header=T)
 head(df)
 dim(df)
@@ -77,8 +77,19 @@ gelman.plot(coda_wb_no_censor[, params2check])
 crosscorr.plot(coda_wb_no_censor[, 286:305])
 crosscorr.plot(coda_wb_no_censor[, c(1, 3:4)])
 
+# Check hpd of betas
+# beta_3 is grubsize
+HPDinterval(coda_wb_no_censor[, c(1,3:4)])
+# We can see that it is not significant.
+mean(matrix_coda[,4])
+exp(mean(matrix_coda[,4]))
+# When we exponentiate the coefficient, we get the hazard ratio, indicating that 
+# for a increase of 1 unit of grub size, the risk of death increases by 45.88%
+# This is true for both the lognormal and weibull models.
 
-# Next a lognormal model no with censoring but random effects.
+
+
+# Next a lognormal model with no censoring but random effects.
 parameters <- c("beta_star", "betas", "plate", "ppo", "icpo", "test", "ks", "ks.rep")
 model_file <- "lognormal_no_censor_random.txt"
 inits <- function(){
@@ -109,6 +120,11 @@ crosscorr.plot(coda_ln_no_censor[, 148:167])
 # Gelman
 gelman.plot(coda_ln_no_censor[, params2check])
 
+# Grub size effect
+HPDinterval(coda_ln_no_censor[, c(1,3:4)])
+mean(matrix_coda_ln_no_censor[,4])
+exp(mean(matrix_coda_ln_no_censor[,4]))
+
 
 # Then weibull model with censoring and random effects
 # Right and interval censoring are accounted for in different loops
@@ -118,7 +134,11 @@ data <- list(n_right=n_right, n_int=n_int, J=J, y_r=df_right$mid, y_int=df_int$m
              right_cens=df_right$LOWERLIM, int_lower_cens=df_int$LOWERLIM, int_upper_cens=df_int$UPPERLIM,
              group_r=df_right$GROUP, grubsize_r=df_right$GRUBSIZE-mean(df_right$GRUBSIZE), urepid_r=df_right$UREPID,
              group_int=df_int$GROUP, grubsize_int=df_int$GRUBSIZE-mean(df_int$GRUBSIZE), urepid_int=df_int$UREPID)
-# Using same inits as above
+# Using same inits as for previous weibull
+inits <- function(){
+    list(betas = rnorm(3, 0, 3), plate_unident = rnorm(J, 0, 3),
+         rho=runif(1, 0, 10))
+}
 print(Sys.time())
 wb_censor <- bugs(data, inits=inits, model.file=model_file, parameters=parameters, n.chains=3,
                  n.burnin=1000, n.iter=10000, n.thin=10, save.history=T, codaPkg=T, bugs.seed=13)
@@ -143,7 +163,12 @@ gelman.plot(coda_wb_censor[, params2check])
 crosscorr.plot(coda_wb_censor[, 146:165])
 # Everything has converged properly
 
-# And finally a lognormal model with censoring and random effects.
+# Grub size effect
+HPDinterval(coda_wb_censor[, c(1,3:4)])
+mean(matrix_coda_wb[,4])
+exp(mean(matrix_coda_wb[,4]))
+
+# And a lognormal model with censoring and random effects.
 parameters <- c("beta_star", "betas", "plate", "ppo_r", "ppo_int", "icpo_r", "icpo_int", "test", "ks", "ks.rep")
 model_file <- "lognormal_censor_random.txt"
 #inits1 <- list(betas = c(0, 0, 0), tau_r = 1/0.5, tau_int=1/0.5, plate=rep(1,J))
@@ -160,11 +185,36 @@ data <- list(n_right=n_right, n_int=n_int, J=J, logy_r=log(df_right$mid), logy_i
              group_int=df_int$GROUP, grubsize_int=df_int$GRUBSIZE-mean(df_int$GRUBSIZE), urepid_int=df_int$UREPID)
 print(Sys.time())
 ln_censor <- bugs(data, inits=inits, model.file=model_file, parameters=parameters, n.chains=3,
-                 n.burnin=1000, n.iter=10000, save.history=T, codaPkg=T)
+                 n.burnin=1000, n.iter=10000, save.history=T, codaPkg=T, DIC=T)
 coda_ln_censor <- read.bugs(ln_censor)
 matrix_coda_ln <- as.matrix(coda_ln_censor)
 colnames(matrix_coda_ln)
-hist(matrix_coda_ln[,148:167])
+
+# QQplot, from page 307 
+# GLMM toenail mixture random effects.R
+b0 <- colMeans(matrix_coda_ln[,148:167])
+b0.quant <- matrix(0, nrow = 3,ncol=J)
+b0.quant
+quantile(matrix_coda_ln[,148],c(0.025,0.50,.975))
+for (i in 148:167) { 
+    b0.quant[,i-147] <- quantile(matrix_coda_ln[,i],c(0.025,0.50,.975))
+}
+b0.quant
+
+unlim <- b0.quant[1,]  
+uplim <- b0.quant[3,]
+qqnorm(b0,ylim=c(min(unlim),max(uplim)),main="",
+      cex.lab=1.5,cex=1.2,cex.axis=1.3)
+qqline(b0,col="red",lwd=2)
+# Wouldn't necessarily expect a mixture distribution of two normals to show non normality here. 
+
+# Evidence that a mixture distribution may be appropriate
+hist(matrix_coda_ln[,148:167], main="Posteriors of Random Effects", xlab="Estimate")
+for (i in 148:167){
+    j=i-147
+    hist(matrix_coda_ln[,i], main=paste("Plate", j), xlab="Estimate")
+}
+hist(matrix_coda_ln[,148])
 # Random eff
 traceplot(coda_ln_censor[,148:167])
 # main eff
@@ -178,6 +228,11 @@ gelman.diag(coda_ln_censor[, params2check])
 gelman.plot(coda_ln_censor[, params2check])
 # low corr
 crosscorr.plot(coda_ln_censor[, 148:167])
+
+# Grub size effect
+HPDinterval(coda_ln_censor[, c(1,3:4)])
+mean(matrix_coda_ln[,4])
+exp(mean(matrix_coda_ln[,4]))
 
 
 # KS test for normality
@@ -213,4 +268,56 @@ CPO_ln <- 1/colMeans(df_icpo_ln)
 logPSBF <- sum(log(CPO_ln)) - sum(log(CPO_weib))
 # Evidence for Lognormal model when considering random effects and censoring
 logPSBF
+
+
+# Let's try a lognormal model with a mixture distribution for the random effects
+parameters <- c("beta_star", "betas", "plate", "ppo_r", "ppo_int", "icpo_r", "icpo_int", "test", "ks", "ks.rep")
+model_file <- "lognormal_censor_random_mixture.txt"
+inits <- function(){
+    list(betas = rnorm(3, 0, 3), plate_unident = rnorm(J, 0, 3),
+         tau_r=runif(1, 0, 10), tau_int=runif(1, 0, 10))
+}
+data <- list(n_right=n_right, n_int=n_int, J=J, logy_r=log(df_right$mid), logy_int=log(df_int$mid), 
+             right_cens=df_right$LOWERLIM, int_lower_cens=df_int$LOWERLIM, int_upper_cens=df_int$UPPERLIM,
+             group_r=df_right$GROUP, grubsize_r=df_right$GRUBSIZE-mean(df_right$GRUBSIZE), urepid_r=df_right$UREPID,
+             group_int=df_int$GROUP, grubsize_int=df_int$GRUBSIZE-mean(df_int$GRUBSIZE), urepid_int=df_int$UREPID)
+print(Sys.time())
+ln_censor_mixture <- bugs(data, inits=inits, model.file=model_file, parameters=parameters, n.chains=3,
+                 n.burnin=1000, n.iter=10000, save.history=T, codaPkg=T, DIC=T)
+coda_ln_censor_mixture <- read.bugs(ln_censor_mixture)
+matrix_coda_ln_mixture <- as.matrix(coda_ln_censor_mixture)
+colnames(matrix_coda_ln_mixture)
+
+hist(matrix_coda_ln_mixture[,148:167], main="Posteriors of Random Effects", xlab="Estimate")
+for (i in 148:167){
+    j=i-147
+    hist(matrix_coda_ln_mixture[,i], main=paste("Plate", j), xlab="Estimate")
+}
+# Random eff
+traceplot(coda_ln_censor_mixture[,148:167])
+# main eff
+traceplot(coda_ln_censor_mixture[,c(1, 3:4)])
+
+# Grub size effect
+HPDinterval(coda_ln_censor_mixture[, c(1,3:4)])
+mean(matrix_coda_ln_mixture[,4])
+exp(mean(matrix_coda_ln_mixture[,4]))
+
+# Compare lognormal to lognormal with mixture distribution for random effects  
+# Get interval and right cenored icpo
+icpo_ind <- 6:145
+
+df_icpo_ln <- dplyr::bind_rows(lapply(coda_ln_censor[, icpo_ind], as.data.frame))
+df_icpo_mixture <- dplyr::bind_rows(lapply(coda_ln_censor_mixture[, icpo_ind], as.data.frame))
+CPO_ln_mixture <- 1/colMeans(df_icpo_mixture)
+CPO_ln <- 1/colMeans(df_icpo_ln)
+logPSBF <- sum(log(CPO_ln)) - sum(log(CPO_ln_mixture))
+# There is evidence that the model with the mixture distribution is preferred.
+logPSBF
+
+# If coda package is set to F
+ln_censor$DIC
+ln_censor_mixture$DIC
+# We prefer the model with the mixture distributions
+
 
